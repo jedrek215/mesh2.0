@@ -1,7 +1,19 @@
+#include "FS.h"
+#include <SoftwareSerial.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMesh.h>
 
+#define MESH_INTR 5 //send Webserver an INTR
+#define MESH_INTACK 4 //INTR from MESH
+#define DEBUG_PIN 16
+
+
+//////////////////////////////////////////////////////////////////////////////////////CHANGE PARAMETER PER MESH NODE
+String ackID = "[ACK] by EN1";
+
 String exampleMeshName("MeshNode_");
+
+volatile bool INTR = false;
 
 unsigned int requestNumber = 0;
 unsigned int responseNumber = 0;
@@ -16,6 +28,12 @@ void networkFilter(int numberOfNetworks, ESP8266WiFiMesh &meshInstance);
 /* Create the mesh node object */
 ESP8266WiFiMesh meshNode = ESP8266WiFiMesh(manageRequest, manageResponse, networkFilter, "ChangeThisWiFiPassword_TODO", exampleMeshName, "", true);
 
+void ServeWeb(){
+  INTR = true;
+}
+
+String decodedmsg = "";
+
 /**
    Callback for when other nodes send you a request
 
@@ -23,24 +41,33 @@ ESP8266WiFiMesh meshNode = ESP8266WiFiMesh(manageRequest, manageResponse, networ
    @param meshInstance The ESP8266WiFiMesh instance that called the function.
    @returns The string to send back to the other node
 */
-String manageRequest(const String &request, ESP8266WiFiMesh &meshInstance) {
+String manageRequest(const String &request, ESP8266WiFiMesh &meshInstance){
   /* Print out received message */
-  if!(request.indexOf("[ACK]")>=0)
-  {
-    if!(sList.indexOf(request)>=0)
-    {
+  if(!request.indexOf("[ACK]")>=0){
+    if(!sList.indexOf(request)>=0){
       sList += " "; 
       sList += request; 
-      Serial.print("Response received: ");
-      Serial.println(response);
-    }
-    
-     re transmit////////////////////////////
+
+      File f = SPIFFS.open("/messages.txt","a");
+      f.println(request);
+      digitalWrite(MESH_INTR,HIGH);
+      Serial.println(request);
+      Serial.flush();
+      digitalWrite(MESH_INTR,LOW);
+
+      String msg = f.readString();
+      f.close();
+    }    
+    // re transmit////////////////////////////
+  }
+  else{
+      
+     ///// ///////////////////////////////////////////////////////////////////////////change this parameter for each mesh node 
+      return (ackID);
   }
 }
-  ///////////////////////////////////////////////////////////////////////////change this parameter for each mesh node 
-  return ("[ACK] by EN1");
-}
+  
+  
 
 /**
    Callback used to decide which networks to connect to once a WiFi scan has been completed.
@@ -72,22 +99,25 @@ void networkFilter(int numberOfNetworks, ESP8266WiFiMesh &meshInstance) {
    @returns The status code resulting from the response, as an int
 */
 transmission_status_t manageResponse(const String &response, ESP8266WiFiMesh &meshInstance) {
-  transmission_status_t statusCode = TS_TRANSMISSION_COMPLETE;
-if!(response.indexOf("[ACK]")>=0)
-  {
-    if!(sList.indexOf(response)>=0)
-    {
-      sList += " "; 
-      sList += response; 
-      Serial.print("Request sent: ");
-      Serial.println(meshInstance.getMessage());
-      Serial.print("Response received: ");
-      Serial.println(response);
-    }
+transmission_status_t statusCode = TS_TRANSMISSION_COMPLETE;
+  if(!response.indexOf("[ACK]")>=0){
+      if(!sList.indexOf(response)>=0){
+        sList += " "; 
+        sList += response; 
+        
+        File f = SPIFFS.open("/messages.txt","a");
+        f.println(request);
+        digitalWrite(MESH_INTR,HIGH);
+        Serial.println(request);
+        Serial.flush();
+        digitalWrite(MESH_INTR,LOW);
+        f.close();
+        
+     }
   }
 
   // Our last request got a response, so time to create a new request.
-  meshInstance.setMessage("Hello world request #" + String(++requestNumber) + " from " + meshInstance.getMeshName() + meshInstance.getNodeID() + ".");
+  //meshInstance.setMessage("Hello world request #" + String(++requestNumber) + " from " + meshInstance.getMeshName() + meshInstance.getNodeID() + ".");
 
   // (void)meshInstance; // This is useful to remove a "unused parameter" compiler warning. Does nothing else.
   return statusCode;
@@ -99,14 +129,14 @@ void setup() {
   WiFi.persistent(false);
 
   Serial.begin(115200);
+  SPIFFS.begin();
+
+  pinMode(MESH_INTR,OUTPUT);
+  pinMode(MESH_INTACK,INPUT);
+  digitalWrite(MESH_INTR,LOW);
+  attachInterrupt(digitalPinToInterrupt(MESH_INTACK),ServeWeb,RISING);
+  
   delay(50); // Wait for Serial.
-
-  //yield(); // Use this if you don't want to wait for Serial.
-
-  Serial.println();
-  Serial.println();
-
-  Serial.println("Setting up mesh node...");
 
   /* Initialise the mesh node */
   meshNode.begin();
@@ -116,13 +146,28 @@ void setup() {
 
 int32_t timeOfLastScan = -10000;
 void loop() {
-  if (millis() - timeOfLastScan > 4000 // Give other nodes some time to connect between data transfers.
-      || (WiFi.status() != WL_CONNECTED && millis() - timeOfLastScan > 2000)) { // Scan for networks with two second intervals when not already connected.
-    String request = "Hello world request #" + String(requestNumber) + " from " + meshNode.getMeshName() + meshNode.getNodeID() + ".";
-    meshNode.attemptTransmission(request, false);
+
+  /*
+   * Interrupt request from the Web Server ESP
+   * Service by storing the message via serial to flash memory via SPIFFs
+   * Reset the interrupt flag afterwards
+   */
+   if(INTR == true){
+      File f = SPIFFS.open("/messages.txt","a");
+      decodedmsg = Serial.readString();
+      f.println(decodedmsg);
+      f.close();
+      INTR = false; //reset the INTR flag
+    }
+
+    File f = SPIFFS.open("/messages.txt","a");
+    String msg = f.readString();
+    f.close();
+  
+  if ((millis() - timeOfLastScan > 4000 || (WiFi.status() != WL_CONNECTED && millis() - timeOfLastScan > 2000))&& decodedmsg.length()>0){ // Scan for networks with two second intervals when not already connected.
+    meshNode.attemptTransmission(decodedmsg, false);
     timeOfLastScan = millis();
 
-   
   } else {
     /* Accept any incoming connections */
     meshNode.acceptRequest();
