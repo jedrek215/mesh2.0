@@ -9,7 +9,7 @@
 
 
 //////////////////////////////////////////////////////////////////////////////////////CHANGE PARAMETER PER MESH NODE////////////////////////////////////////////////////////
-String ackID = "[ACK] by EN1";
+String ackID = "[ACK] by EN3";
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 String exampleMeshName("MeshNode_");
@@ -26,6 +26,7 @@ boolean toTransmit = false;
 String manageRequest(const String &request, ESP8266WiFiMesh &meshInstance);
 transmission_status_t manageResponse(const String &response, ESP8266WiFiMesh &meshInstance);
 void networkFilter(int numberOfNetworks, ESP8266WiFiMesh &meshInstance);
+void restartAP();
 
 /* Create the mesh node object */
 ESP8266WiFiMesh meshNode = ESP8266WiFiMesh(manageRequest, manageResponse, networkFilter, "ChangeThisWiFiPassword_TODO", exampleMeshName, "", true);
@@ -36,7 +37,6 @@ void ServeWeb(){
 
 /**
    Callback for when other nodes send you a request
-
    @param request The request string received from another node in the mesh
    @param meshInstance The ESP8266WiFiMesh instance that called the function.
    @returns The string to send back to the other node
@@ -64,12 +64,16 @@ String manageRequest(const String &request, ESP8266WiFiMesh &meshInstance){
         Serial.flush();
         digitalWrite(MESH_INTR,LOW);
   }
+//  if(request.length()>0){
+//    WiFi.mode(WIFI_STA);
+//    meshNode.attemptTransmission(request, true);
+//  }
+  
       return (ackID);
 }
 
 /**
    Callback used to decide which networks to connect to once a WiFi scan has been completed.
-
    @param numberOfNetworks The number of networks found in the WiFi scan.
    @param meshInstance The ESP8266WiFiMesh instance that called the function.
 */
@@ -82,7 +86,8 @@ void networkFilter(int numberOfNetworks, ESP8266WiFiMesh &meshInstance) {
     if (meshNameIndex >= 0) {
       uint64_t targetNodeID = ESP8266WiFiMesh::stringToUint64(currentSSID.substring(meshNameIndex + meshInstance.getMeshName().length()));
 
-      if (targetNodeID < ESP8266WiFiMesh::stringToUint64(meshInstance.getNodeID())) {
+      
+      if (targetNodeID < ESP8266WiFiMesh::stringToUint64(meshInstance.getNodeID())|| targetNodeID > ESP8266WiFiMesh::stringToUint64(meshInstance.getNodeID())) {
         ESP8266WiFiMesh::connectionQueue.push_back(NetworkInfo(i));
       }
     }
@@ -119,7 +124,7 @@ transmission_status_t statusCode = TS_TRANSMISSION_COMPLETE;
         digitalWrite(MESH_INTR,LOW);
   }
   if(decodedmsg.length()>0){
-    meshInstance.setMessage(decodedmsg);
+    meshInstance.setMessage(decodedmsg+ackID);
     decodedmsg = "";
   }
 
@@ -149,6 +154,7 @@ void setup() {
   meshNode.begin();
   meshNode.activateAP(); // Each AP requires a separate server port.
   meshNode.setStaticIP(IPAddress(192, 168, 4, 22)); // Activate static IP mode to speed up connection times.
+  
 }
 
 int32_t timeOfLastScan = -10000;
@@ -171,9 +177,9 @@ void loop() {
     //String msg = f.readString();
     //f.close();
   
-  if ((millis() - timeOfLastScan > 4000 || (WiFi.status() != WL_CONNECTED && millis() - timeOfLastScan > 2000))&& decodedmsg.length()>0){ // Scan for networks with two second intervals when not already connected.
+  if ((millis() - timeOfLastScan > 3000 || (WiFi.status() != WL_CONNECTED && millis() - timeOfLastScan > 2000))&& decodedmsg.length()>0){ // Scan for networks with two second intervals when not already connected.
     //SET TO TRUE SO WE DISCONNECT TO THE SENT NODE
-    meshNode.attemptTransmission(decodedmsg, true);
+    meshNode.attemptTransmission(decodedmsg+ackID, true);
     timeOfLastScan = millis();
 
   } else {
